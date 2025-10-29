@@ -1,59 +1,80 @@
 <?php
 
 namespace App\Http\Controllers;
-use App\Models\Pembelian;
-use App\Models\Pengeluaran;
-use App\Models\Penjualan;
-use App\Models\Produk;
+
+use App\Models\Deposit;
+use App\Models\Sales;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Carbon\Carbon;
 
 class DashboardController extends Controller
 {
-        public function index()
+    public function index()
     {
-        $trankjual = Penjualan::orderBy('updated_at', 'desc')->take(5)->get();
-        $trankbeli = Pembelian::orderBy('updated_at', 'desc')->take(5)->get();
+        $user = Auth::user();
+        $bulanSekarang = Carbon::now()->locale('id')->translatedFormat('F Y');
+        // Ambil tanggal awal dan akhir bulan ini
+        $tanggal_awal = date('Y-07-01');
+        $tanggal_akhir = date('Y-07-d');
+        $sales = Sales::where('CustomerCD', $user->id)
+              ->orderBy('DateEncoded', 'desc')->limit(5)
+              ->get();     
+        $deposit = Deposit::where('cust_ID', $user->id)
+              ->orderBy('Dateencoded', 'desc')
+              ->get();
+        // 🔹 1. Ambil saldo terakhir
+        $latestDeposit = Deposit::where('cust_ID', $user->id)
+            ->orderBy('Dateencoded', 'desc')
+            ->first();
 
-        $tanggal_awal = date('Y-m-01');
-        $tanggal_akhir = date('Y-m-d');
+        $saldo_akhir = $latestDeposit->Saldo_Akhir ?? 0;
+        $topup_terakhir = $latestDeposit->Top_Up ?? 0;
+        $tanggal_topup = $latestDeposit->Dateencoded ?? null;
 
-        $penjualan = 0;
-        $totalpendapatan = 0;
-        $pembelian = 0;
-        $totalexpense = 0;
-        $pengeluaran = 0;
+        // 🔹 2. Hitung total pembelian selama bulan ini
+        $totalPembelian = Sales::where('CustomerCD', $user->id)
+            ->whereBetween('DateEncoded', [$tanggal_awal, $tanggal_akhir])
+            ->sum('Subtotal');
 
+        // 🔹 3. Hitung total pengeluaran sejak topup terakhir
+        $pengeluaran_sejak_topup = Sales::where('CustomerCD', $user->id)
+            ->where('DateEncoded', '>=', $tanggal_topup)
+            ->sum('Subtotal');
 
-        $data_tanggal = array();
-        $data_penjualan = array();
-        $data_pengeluaran = array();
+        $sisa_saldo = $saldo_akhir - $pengeluaran_sejak_topup;
 
-        while (strtotime($tanggal_awal) <= strtotime($tanggal_akhir)) {
-            $data_tanggal[] = (int) substr($tanggal_awal, 8, 2);
+        // 🔹 4. Siapkan data grafik harian (pengeluaran per tanggal bulan ini)
+        $data_tanggal = [];
+        $data_pengeluaran = [];
 
-            $total_penjualan = Penjualan::where('created_at', 'LIKE', "%$tanggal_awal%")->sum('bayar');
-            $total_pembelian = Pembelian::where('created_at', 'LIKE', "%$tanggal_awal%")->sum('bayar');
-            $total_pengeluaran = Pengeluaran::where('created_at', 'LIKE', "%$tanggal_awal%")->sum('jumlah');
-
-            $exp = $total_pembelian + $total_pengeluaran;
-            $penjualan += $total_penjualan;
-            $pembelian += $total_pembelian;
-            $pengeluaran += $total_pengeluaran;
-            $totalexpense += $exp;
-            
-            $pendapatan = $total_penjualan - $exp;
-            $totalpendapatan += $pendapatan;
-            $data_penjualan[] += $total_penjualan;
-            $data_pengeluaran[] += $exp;
-
-            $tanggal_awal = date('Y-m-d', strtotime("+1 day", strtotime($tanggal_awal)));
+        $tanggal = $tanggal_awal;
+        while (strtotime($tanggal) <= strtotime($tanggal_akhir)) {
+            $data_tanggal[] = (int) substr($tanggal, 8, 2);
+            $total_harian = Sales::where('CustomerCD', $user->id)
+                ->where('DateEncoded', 'LIKE', "%$tanggal%")
+                ->sum('Subtotal');
+            $data_pengeluaran[] = $total_harian;
+            $tanggal = date('Y-m-d', strtotime("+1 day", strtotime($tanggal)));
         }
+
+        // 🔹 5. Pie chart: bandingkan topup terakhir vs pengeluaran sejak topup
         $data_piechart = [
-            $penjualan,
-            $pembelian,
-            $pengeluaran
+            (float)$sisa_saldo,
+            (float)$pengeluaran_sejak_topup,
         ];
-        $tanggal_awal = date('Y-m-01');
-        return view('dashboard', compact('penjualan', 'totalpendapatan', 'pembelian', 'totalexpense', 'pengeluaran', 'tanggal_awal', 'tanggal_akhir', 'data_tanggal', 'data_penjualan', 'data_pengeluaran', 'data_piechart' , 'trankjual', 'trankbeli'));
-    }//
+
+        // 🔹 6. Kirim semua data ke view
+        return view('dashboard', compact(
+            'sisa_saldo',
+            'totalPembelian',
+            'data_tanggal',
+            'data_pengeluaran',
+            'data_piechart',
+            'pengeluaran_sejak_topup',
+            'bulanSekarang',
+            'sales',
+            'deposit'
+        ));
+    }
 }

@@ -2,7 +2,7 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="light">
 
-<x-head />
+<x-head title="{{$title}}"/>
 
 <body>
 
