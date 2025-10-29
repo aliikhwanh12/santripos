@@ -14,57 +14,70 @@ class DashboardController extends Controller
     {
         $user = Auth::user();
         $bulanSekarang = Carbon::now()->locale('id')->translatedFormat('F Y');
-        // Ambil tanggal awal dan akhir bulan ini
+
+        // 🔹 Tanggal awal & akhir bulan ini
         $tanggal_awal = date('Y-m-01');
         $tanggal_akhir = date('Y-m-d');
+
+        // 🔹 Ambil 5 transaksi terakhir
         $sales = Sales::where('CustomerCD', $user->id)
-              ->orderBy('DateEncoded', 'desc')->limit(5)
-              ->get();     
+            ->orderBy('DateEncoded', 'desc')
+            ->limit(5)
+            ->get();
+
+        // 🔹 Ambil semua riwayat deposit user
         $deposit = Deposit::where('cust_ID', $user->id)
-              ->orderBy('Dateencoded', 'desc')
-              ->get();
-        // 🔹 1. Ambil saldo terakhir
+            ->orderBy('Dateencoded', 'desc')
+            ->get();
+
+        // 🔹 Ambil deposit terakhir (kalau ada)
         $latestDeposit = Deposit::where('cust_ID', $user->id)
             ->orderBy('Dateencoded', 'desc')
             ->first();
 
+        // 🔹 Jika belum pernah top up, set nilai default
         $saldo_akhir = $latestDeposit->Saldo_Akhir ?? 0;
         $topup_terakhir = $latestDeposit->Top_Up ?? 0;
         $tanggal_topup = $latestDeposit->Dateencoded ?? null;
 
-        // 🔹 2. Hitung total pembelian selama bulan ini
+        // 🔹 Hitung total pembelian bulan ini
         $totalPembelian = Sales::where('CustomerCD', $user->id)
             ->whereBetween('DateEncoded', [$tanggal_awal, $tanggal_akhir])
             ->sum('Subtotal');
 
-        // 🔹 3. Hitung total pengeluaran sejak topup terakhir
-        $pengeluaran_sejak_topup = Sales::where('CustomerCD', $user->id)
-            ->where('DateEncoded', '>=', $tanggal_topup)
-            ->sum('Subtotal');
+        // 🔹 Hitung pengeluaran sejak topup terakhir (cek null dulu)
+        if ($tanggal_topup) {
+            $pengeluaran_sejak_topup = Sales::where('CustomerCD', $user->id)
+                ->where('DateEncoded', '>=', $tanggal_topup)
+                ->sum('Subtotal');
+        } else {
+            $pengeluaran_sejak_topup = 0;
+        }
 
-        $sisa_saldo = $saldo_akhir - $pengeluaran_sejak_topup;
+        // 🔹 Hitung sisa saldo (kalau belum ada topup, tetap 0)
+        $sisa_saldo = max(0, $saldo_akhir - $pengeluaran_sejak_topup);
 
-        // 🔹 4. Siapkan data grafik harian (pengeluaran per tanggal bulan ini)
+        // 🔹 Siapkan data grafik harian
         $data_tanggal = [];
         $data_pengeluaran = [];
-
         $tanggal = $tanggal_awal;
+
         while (strtotime($tanggal) <= strtotime($tanggal_akhir)) {
             $data_tanggal[] = (int) substr($tanggal, 8, 2);
             $total_harian = Sales::where('CustomerCD', $user->id)
-                ->where('DateEncoded', 'LIKE', "%$tanggal%")
+                ->whereDate('DateEncoded', $tanggal)
                 ->sum('Subtotal');
             $data_pengeluaran[] = $total_harian;
             $tanggal = date('Y-m-d', strtotime("+1 day", strtotime($tanggal)));
         }
 
-        // 🔹 5. Pie chart: bandingkan topup terakhir vs pengeluaran sejak topup
+        // 🔹 Pie chart: sisa saldo vs pengeluaran
         $data_piechart = [
-            (float)$sisa_saldo,
-            (float)$pengeluaran_sejak_topup,
+            (float) $sisa_saldo,
+            (float) $pengeluaran_sejak_topup,
         ];
 
-        // 🔹 6. Kirim semua data ke view
+        // 🔹 Kirim semua data ke view
         return view('dashboard', compact(
             'sisa_saldo',
             'totalPembelian',
