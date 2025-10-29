@@ -15,8 +15,8 @@ class DashboardController extends Controller
         $user = Auth::user();
         $bulanSekarang = Carbon::now()->locale('id')->translatedFormat('F Y');
         // Ambil tanggal awal dan akhir bulan ini
-        $tanggal_awal = date('Y-07-01');
-        $tanggal_akhir = date('Y-07-d');
+        $tanggal_awal = date('Y-m-01');
+        $tanggal_akhir = date('Y-m-d');
         $sales = Sales::where('CustomerCD', $user->id)
               ->orderBy('DateEncoded', 'desc')->limit(5)
               ->get();     
